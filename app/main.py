@@ -19,9 +19,10 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from urllib.parse import urlencode
 
-from . import db, service
+from . import db, review_service, service
 from .compute import display_q
 from .csvio import ParseError
+from .review import VERDICT_LABELS
 
 BASE_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -44,6 +45,9 @@ STATUS_LABELS = {
     "revoked": "已撤销",
     "unchanged": "未变化",
 }
+
+ROUND_STATUS_LABELS = {"open": "进行中", "completed": "已收齐"}
+LABEL_LABELS = {"target": "靶标", "decoy": "诱饵"}
 
 ISSUE_HINTS = {
     "duplicate_spectrum": "请修正清单中的重复行后以更高修订号重新上传。",
@@ -546,6 +550,166 @@ def create_app(
                 "issues": data["issues"],
             }
         )
+
+    @app.get("/blind", response_class=HTMLResponse)
+    def blind_page(request: Request, msg: str | None = None, level: str = "info"):
+        def load(conn: sqlite3.Connection):
+            return {
+                "rounds": review_service.list_rounds(conn),
+                "candidates": review_service.current_candidate_info(conn),
+            }
+
+        data = with_conn(load)
+        return render(
+            request,
+            "blind.html",
+            {
+                "msg": msg,
+                "level": level,
+                "round_status_labels": ROUND_STATUS_LABELS,
+                **data,
+            },
+        )
+
+    @app.post("/blind/open")
+    def blind_open(request: Request):
+        try:
+            round_id = review_service.open_round(path)
+        except service.ServiceError as exc:
+            return render(
+                request,
+                "message.html",
+                {
+                    "title": "无法开轮",
+                    "message": str(exc),
+                    "level": "error",
+                    "back_url": "/blind",
+                },
+                status_code=400,
+            )
+        query = urlencode(
+            {
+                "msg": f"第 {round_id} 轮盲审已开轮，请下载条目 CSV 分发复核。",
+                "level": "ok",
+            }
+        )
+        return RedirectResponse(f"/blind/{round_id}?{query}", status_code=303)
+
+    @app.get("/blind/{round_id}", response_class=HTMLResponse)
+    def blind_round_page(
+        request: Request,
+        round_id: int,
+        msg: str | None = None,
+        level: str = "info",
+    ):
+        detail = with_conn(lambda conn: review_service.get_round_detail(conn, round_id))
+        if detail is None:
+            return render(
+                request,
+                "message.html",
+                {
+                    "title": "轮次不存在",
+                    "message": f"盲审轮次 {round_id} 不存在。",
+                    "level": "error",
+                    "back_url": "/blind",
+                },
+                status_code=404,
+            )
+        return render(
+            request,
+            "blind_round.html",
+            {
+                "msg": msg,
+                "level": level,
+                "round": detail,
+                "label_labels": LABEL_LABELS,
+                "verdict_labels": VERDICT_LABELS,
+            },
+        )
+
+    @app.get("/blind/{round_id}/sheet.csv")
+    def blind_sheet(request: Request, round_id: int):
+        try:
+            rows = review_service.sheet_rows(path, round_id)
+        except service.NotFoundError as exc:
+            return render(
+                request,
+                "message.html",
+                {
+                    "title": "轮次不存在",
+                    "message": str(exc),
+                    "level": "error",
+                    "back_url": "/blind",
+                },
+                status_code=404,
+            )
+        buffer = io.StringIO()
+        buffer.write("﻿")
+        writer = csv.writer(buffer, lineterminator="\n")
+        writer.writerow(["条目号", "样本号", "谱图号", "肽段", "分数"])
+        for row in rows:
+            writer.writerow(
+                [row["entry_no"], row["sample"], row["spectrum"],
+                 row["peptide"], row["score"]]
+            )
+        filename = f"blind_round_{round_id}.csv"
+        return StreamingResponse(
+            iter([buffer.getvalue()]),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            },
+        )
+
+    @app.post("/blind/{round_id}/judgments")
+    def blind_submit(
+        request: Request,
+        round_id: int,
+        file: UploadFile = File(...),
+    ):
+        data = file.file.read()
+        if len(data) > MAX_UPLOAD_BYTES:
+            return render(
+                request,
+                "message.html",
+                {
+                    "title": "上传失败",
+                    "message": "文件超过 64 MiB 上限。",
+                    "level": "error",
+                    "back_url": f"/blind/{round_id}",
+                },
+                status_code=413,
+            )
+        try:
+            result = review_service.submit_judgments(
+                path, round_id, data, file.filename or "judgments.csv"
+            )
+        except service.NotFoundError as exc:
+            return render(
+                request,
+                "message.html",
+                {
+                    "title": "轮次不存在",
+                    "message": str(exc),
+                    "level": "error",
+                    "back_url": "/blind",
+                },
+                status_code=404,
+            )
+        except (service.ServiceError, ParseError) as exc:
+            return render(
+                request,
+                "message.html",
+                {
+                    "title": "判定批次被拒收",
+                    "message": str(exc),
+                    "level": "error",
+                    "back_url": f"/blind/{round_id}",
+                },
+                status_code=400,
+            )
+        query = urlencode({"msg": result.message, "level": "ok"})
+        return RedirectResponse(f"/blind/{round_id}?{query}", status_code=303)
 
     return app
 

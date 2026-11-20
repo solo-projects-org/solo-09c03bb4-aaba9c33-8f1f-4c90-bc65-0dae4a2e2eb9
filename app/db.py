@@ -123,6 +123,46 @@ CREATE TABLE IF NOT EXISTS release_rows (
 );
 CREATE INDEX IF NOT EXISTS idx_release_rows_accepted
     ON release_rows (release_id, accepted, rank);
+
+CREATE TABLE IF NOT EXISTS review_rounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidate_source_id INTEGER NOT NULL REFERENCES sources(id),
+    pair_count INTEGER NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('open', 'completed')),
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_review_rounds_source
+    ON review_rounds (candidate_source_id);
+
+CREATE TABLE IF NOT EXISTS review_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    round_id INTEGER NOT NULL REFERENCES review_rounds(id) ON DELETE CASCADE,
+    entry_no INTEGER NOT NULL,
+    sample TEXT NOT NULL,
+    spectrum TEXT NOT NULL,
+    peptide TEXT NOT NULL,
+    label TEXT NOT NULL CHECK (label IN ('target', 'decoy')),
+    score TEXT NOT NULL,
+    UNIQUE (round_id, entry_no),
+    UNIQUE (round_id, sample, spectrum)
+);
+
+CREATE TABLE IF NOT EXISTS review_batches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    round_id INTEGER NOT NULL REFERENCES review_rounds(id) ON DELETE CASCADE,
+    received INTEGER NOT NULL,
+    applied INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS review_judgments (
+    entry_id INTEGER NOT NULL REFERENCES review_entries(id) ON DELETE CASCADE,
+    verdict TEXT NOT NULL CHECK (verdict IN ('pass', 'fail')),
+    batch_id INTEGER NOT NULL REFERENCES review_batches(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (entry_id)
+);
 """
 
 DEFAULT_THRESHOLD = "0.01"

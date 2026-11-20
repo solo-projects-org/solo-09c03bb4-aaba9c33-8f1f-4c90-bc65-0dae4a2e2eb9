@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}盲审 · 谱图匹配放行台{% endblock %}
+{% block content %}
+<div class="grid">
+
+  <section class="card span-2">
+    <div class="card-head">
+      <h2>人工复核盲审</h2>
+      {% if candidates %}
+        <span class="badge ok">现行候选修订 {{ candidates.revision }}</span>
+      {% else %}
+        <span class="badge warn">尚未上传候选清单</span>
+      {% endif %}
+    </div>
+    <p class="muted">
+      用于检验人工复核是否会把诱饵判成真实匹配。开轮时从<strong>现行候选清单</strong>取每谱唯一的
+      最高分候选（最高分并列的谱图跳过），靶标与诱饵随机各抽最多 10 条、按剩余较少的一类取等量配对；
+      凑不出一对则无法开轮。同一候选修订内，同一（样本号，谱图号）只会被抽中一次，
+      尚未收齐答卷的轮次也算在内。条目 CSV 顺序已打乱，只含条目号、样本号、谱图号、肽段与分数；
+      收齐全部判定前不显示靶标/诱饵标签。候选换版或进程重启后，未收齐的轮次仍按原抽样收件。
+      （新轮次则按新的现行候选修订抽取）。
+    </p>
+    {% if candidates %}
+    <p class="muted">现行候选：修订号 {{ candidates.revision }} · {{ candidates.filename }}
+      · {{ candidates.row_count }} 行。</p>
+    {% endif %}
+    <form method="post" action="/blind/open">
+      <button class="primary" type="submit" {% if not candidates %}disabled{% endif %}>开新一轮</button>
+    </form>
+  </section>
+
+  <section class="card span-2">
+    <h2>轮次</h2>
+    {% if rounds %}
+    <table>
+      <thead>
+        <tr>
+          <th>轮次</th><th>候选修订</th><th>配对数</th><th>状态</th>
+          <th>收件进度</th><th>开轮时间</th><th>收齐时间</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for round in rounds %}
+        <tr>
+          <td>#{{ round.id }}</td>
+          <td>{{ round.candidate_revision }}</td>
+          <td>{{ round.pair_count }} 对</td>
+          <td><span class="badge {{ round.status }}">{{ round_status_labels[round.status] }}</span></td>
+          <td>{{ round.judged }}/{{ round.total }}</td>
+          <td>{{ round.created_at }}</td>
+          <td>{{ round.completed_at or '—' }}</td>
+          <td>
+            <a class="button small" href="/blind/{{ round.id }}">详情</a>
+            <a class="button small" href="/blind/{{ round.id }}/sheet.csv">条目 CSV</a>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted">尚无盲审轮次。</p>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}

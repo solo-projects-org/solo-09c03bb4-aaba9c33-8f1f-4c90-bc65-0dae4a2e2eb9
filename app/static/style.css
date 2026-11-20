@@ -89,7 +89,8 @@ main { padding: 22px 28px 40px; max-width: 1280px; margin: 0 auto; }
   color: var(--muted);
 }
 .badge.ok, .badge.done, .badge.active { background: #e3f5ec; color: var(--ok); }
-.badge.pending, .badge.running { background: #e8f1ff; color: var(--accent); }
+.badge.pending, .badge.running, .badge.open { background: #e8f1ff; color: var(--accent); }
+.badge.completed { background: #e3f5ec; color: var(--ok); }
 .badge.blocked, .badge.failed { background: #fdeceb; color: var(--err); }
 .badge.superseded { background: #f1f0f6; color: #5b5675; }
 .badge.warn { background: #fff5e6; color: var(--warn); }
